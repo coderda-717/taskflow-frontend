@@ -4,6 +4,7 @@ import api from '../services/api'
 
 const emit = defineEmits(['navigate', 'showToast'])
 
+// Initialize tasks as an empty array to prevent filter errors
 const tasks = ref([])
 const currentView = ref('all')
 const showAddTaskModal = ref(false)
@@ -25,14 +26,25 @@ const userSettings = ref({
   first_name: '',
   last_name: '',
   email: '',
-  username: ''
+  username: '',
+  current_password: '',
+  new_password: '',
+  confirm_password: ''
 })
+
+const showPasswordFields = ref(false)
 
 const currentDate = computed(() => 
   new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
 )
 
 const filteredTasks = computed(() => {
+  // Safeguard: ensure tasks.value is always an array
+  if (!Array.isArray(tasks.value)) {
+    console.warn('tasks.value is not an array:', tasks.value)
+    return []
+  }
+  
   const today = new Date().toISOString().split('T')[0]
   
   switch(currentView.value) {
@@ -50,14 +62,15 @@ const filteredTasks = computed(() => {
 })
 
 const completedCount = computed(() => 
-  tasks.value.filter(task => task.status === 'completed').length
+  Array.isArray(tasks.value) ? tasks.value.filter(task => task.status === 'completed').length : 0
 )
 
 const pendingCount = computed(() => 
-  tasks.value.filter(task => task.status === 'pending').length
+  Array.isArray(tasks.value) ? tasks.value.filter(task => task.status === 'pending').length : 0
 )
 
 const overdueCount = computed(() => {
+  if (!Array.isArray(tasks.value)) return 0
   const today = new Date().toISOString().split('T')[0]
   return tasks.value.filter(task => 
     task.date < today && task.status !== 'completed'
@@ -101,10 +114,32 @@ const loadTasks = async () => {
   
   try {
     const response = await api.tasks.getAll()
-    tasks.value = response.data
+    console.log('API Response:', response.data)
+    
+    // Handle different response formats
+    if (Array.isArray(response.data)) {
+      tasks.value = response.data
+    } else if (response.data && Array.isArray(response.data.results)) {
+      // Handle paginated response
+      tasks.value = response.data.results
+    } else {
+      console.error('Unexpected API response format:', response.data)
+      tasks.value = []
+      showToast('Unexpected data format received', 'error')
+    }
+    
+    console.log('Tasks loaded:', tasks.value.length)
   } catch (error) {
     console.error('Error loading tasks:', error)
-    showToast('Failed to load tasks', 'error')
+    console.error('Error details:', error.response?.data)
+    tasks.value = []
+    
+    if (error.response?.status === 401) {
+      showToast('Session expired. Please login again.', 'error')
+      setTimeout(() => emit('navigate', 'login'), 2000)
+    } else {
+      showToast('Failed to load tasks', 'error')
+    }
   } finally {
     isLoading.value = false
   }
@@ -119,12 +154,14 @@ const loadUserProfile = () => {
         first_name: user.value.first_name || '',
         last_name: user.value.last_name || '',
         email: user.value.email || '',
-        username: user.value.username || ''
+        username: user.value.username || '',
+        current_password: '',
+        new_password: '',
+        confirm_password: ''
       }
     }
   } catch (error) {
     console.error('Error loading user profile:', error)
-    // Set default user if data is corrupted
     user.value = { username: 'User' }
   }
 }
@@ -192,16 +229,67 @@ const deleteTask = async (id) => {
 
 const updateSettings = async () => {
   try {
-    const updatedUser = {
-      ...user.value,
-      ...userSettings.value
+    // Validate password change if attempted
+    if (userSettings.value.new_password) {
+      if (!userSettings.value.current_password) {
+        showToast('Please enter your current password', 'error')
+        return
+      }
+      if (userSettings.value.new_password !== userSettings.value.confirm_password) {
+        showToast('New passwords do not match', 'error')
+        return
+      }
+      if (userSettings.value.new_password.length < 8) {
+        showToast('New password must be at least 8 characters', 'error')
+        return
+      }
     }
-    
-    localStorage.setItem('user_data', JSON.stringify(updatedUser))
-    user.value = updatedUser
-    
-    showSettingsModal.value = false
-    showToast('Settings updated successfully! ✓')
+
+    // Prepare update data
+    const updateData = {
+      first_name: userSettings.value.first_name,
+      last_name: userSettings.value.last_name,
+      email: userSettings.value.email,
+      username: userSettings.value.username
+    }
+
+    // Add password fields if changing password
+    if (userSettings.value.new_password) {
+      updateData.current_password = userSettings.value.current_password
+      updateData.new_password = userSettings.value.new_password
+    }
+
+    // Call API to update profile (you'll need to add this endpoint)
+    try {
+      await api.auth.updateProfile(updateData)
+      
+      // Update local storage
+      const updatedUser = {
+        ...user.value,
+        first_name: userSettings.value.first_name,
+        last_name: userSettings.value.last_name,
+        email: userSettings.value.email,
+        username: userSettings.value.username
+      }
+      
+      localStorage.setItem('user_data', JSON.stringify(updatedUser))
+      user.value = updatedUser
+      
+      // Clear password fields
+      userSettings.value.current_password = ''
+      userSettings.value.new_password = ''
+      userSettings.value.confirm_password = ''
+      showPasswordFields.value = false
+      
+      showSettingsModal.value = false
+      showToast('Settings updated successfully! ✓')
+    } catch (apiError) {
+      console.error('API Error:', apiError)
+      const errorMessage = apiError.response?.data?.detail || 
+                          apiError.response?.data?.error ||
+                          'Failed to update settings'
+      showToast(errorMessage, 'error')
+    }
   } catch (error) {
     console.error('Error updating settings:', error)
     showToast('Failed to update settings', 'error')

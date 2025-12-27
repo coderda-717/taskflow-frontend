@@ -49,7 +49,8 @@ apiClient.interceptors.response.use(
         // Refresh failed, logout user
         localStorage.removeItem('access_token')
         localStorage.removeItem('refresh_token')
-        window.location.href = '/login'
+        localStorage.removeItem('user_data')
+        window.location.href = '/'
         return Promise.reject(refreshError)
       }
     }
@@ -69,6 +70,9 @@ export default {
     },
     getProfile() {
       return apiClient.get('/auth/profile/')
+    },
+    updateProfile(userData) {
+      return apiClient.patch('/auth/profile/update/', userData)
     },
   },
 
