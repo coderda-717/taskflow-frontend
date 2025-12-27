@@ -2,14 +2,17 @@
 import { ref, computed, onMounted } from 'vue'
 import api from '../services/api'
 
-const emit = defineEmits(['navigate'])
+const emit = defineEmits(['navigate', 'showToast'])
 
 const tasks = ref([])
-const currentView = ref('today')
+const currentView = ref('all')
 const showAddTaskModal = ref(false)
-const showNotification = ref(false)
-const notificationMessage = ref('')
+const showSettingsModal = ref(false)
+const showMobileMenu = ref(false)
 const isLoading = ref(false)
+const isWakingUp = ref(false)
+const wakeUpProgress = ref(0)
+const user = ref(null)
 
 const newTask = ref({
   title: '',
@@ -20,13 +23,32 @@ const newTask = ref({
   priority: 'medium'
 })
 
+const userSettings = ref({
+  first_name: '',
+  last_name: '',
+  email: '',
+  username: ''
+})
+
 const currentDate = computed(() => 
   new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
 )
 
-const todayTasks = computed(() => {
+const filteredTasks = computed(() => {
   const today = new Date().toISOString().split('T')[0]
-  return tasks.value.filter(task => task.date === today)
+  
+  switch(currentView.value) {
+    case 'today':
+      return tasks.value.filter(task => task.date === today)
+    case 'upcoming':
+      return tasks.value.filter(task => task.date >= today && task.status !== 'completed')
+    case 'completed':
+      return tasks.value.filter(task => task.status === 'completed')
+    case 'pending':
+      return tasks.value.filter(task => task.status === 'pending')
+    default:
+      return tasks.value
+  }
 })
 
 const completedCount = computed(() => 
@@ -37,12 +59,22 @@ const pendingCount = computed(() =>
   tasks.value.filter(task => task.status === 'pending').length
 )
 
-const showToast = (message) => {
-  notificationMessage.value = message
-  showNotification.value = true
-  setTimeout(() => {
-    showNotification.value = false
-  }, 2500)
+const overdueCount = computed(() => {
+  const today = new Date().toISOString().split('T')[0]
+  return tasks.value.filter(task => 
+    task.date < today && task.status !== 'completed'
+  ).length
+})
+
+const greeting = computed(() => {
+  const hour = new Date().getHours()
+  if (hour < 12) return 'Good morning'
+  if (hour < 18) return 'Good afternoon'
+  return 'Good evening'
+})
+
+const showToast = (message, type = 'success') => {
+  emit('showToast', { message, type })
 }
 
 const formatDate = (dateStr) => {
@@ -60,21 +92,63 @@ const formatDate = (dateStr) => {
   }
 }
 
+const animateWakeUp = () => {
+  wakeUpProgress.value = 0
+  const interval = setInterval(() => {
+    if (wakeUpProgress.value < 90 && isWakingUp.value) {
+      wakeUpProgress.value += 10
+    } else if (!isWakingUp.value) {
+      wakeUpProgress.value = 100
+      clearInterval(interval)
+    }
+  }, 1000)
+}
+
 const loadTasks = async () => {
   isLoading.value = true
+  const startTime = Date.now()
+  
+  const wakeUpTimer = setTimeout(() => {
+    isWakingUp.value = true
+    animateWakeUp()
+  }, 2000)
+  
   try {
-    if (currentView.value === 'today') {
-      const response = await api.tasks.getToday()
-      tasks.value = response.data
-    } else {
-      const response = await api.tasks.getAll()
-      tasks.value = response.data
+    const response = await api.tasks.getAll()
+    tasks.value = response.data
+    
+    const loadTime = Date.now() - startTime
+    clearTimeout(wakeUpTimer)
+    
+    if (loadTime > 5000) {
+      showToast('Server was sleeping - now awake! 🚀')
     }
+    
+    isWakingUp.value = false
+    wakeUpProgress.value = 100
   } catch (error) {
     console.error('Error loading tasks:', error)
-    showToast('Failed to load tasks')
+    clearTimeout(wakeUpTimer)
+    isWakingUp.value = false
+    showToast('Failed to load tasks', 'error')
   } finally {
     isLoading.value = false
+    setTimeout(() => {
+      isWakingUp.value = false
+    }, 500)
+  }
+}
+
+const loadUserProfile = () => {
+  const userData = localStorage.getItem('user_data')
+  if (userData) {
+    user.value = JSON.parse(userData)
+    userSettings.value = {
+      first_name: user.value.first_name || '',
+      last_name: user.value.last_name || '',
+      email: user.value.email || '',
+      username: user.value.username || ''
+    }
   }
 }
 
@@ -105,10 +179,10 @@ const addTask = async () => {
     }
     
     showAddTaskModal.value = false
-    showToast('Task added successfully')
+    showToast('Task added successfully! ✓')
   } catch (error) {
     console.error('Error adding task:', error)
-    showToast('Failed to add task')
+    showToast('Failed to add task', 'error')
   }
 }
 
@@ -119,163 +193,336 @@ const toggleTask = async (id) => {
     if (taskIndex !== -1) {
       tasks.value[taskIndex] = response.data
     }
-    showToast(response.data.status === 'completed' ? 'Task completed!' : 'Task reopened')
+    showToast(response.data.status === 'completed' ? 'Task completed! 🎉' : 'Task reopened')
   } catch (error) {
     console.error('Error toggling task:', error)
-    showToast('Failed to update task')
+    showToast('Failed to update task', 'error')
   }
 }
 
 const deleteTask = async (id) => {
+  if (!confirm('Are you sure you want to delete this task?')) return
+  
   try {
     await api.tasks.delete(id)
     tasks.value = tasks.value.filter(t => t.id !== id)
     showToast('Task deleted')
   } catch (error) {
     console.error('Error deleting task:', error)
-    showToast('Failed to delete task')
+    showToast('Failed to delete task', 'error')
+  }
+}
+
+const updateSettings = async () => {
+  try {
+    const updatedUser = {
+      ...user.value,
+      ...userSettings.value
+    }
+    
+    localStorage.setItem('user_data', JSON.stringify(updatedUser))
+    user.value = updatedUser
+    
+    showSettingsModal.value = false
+    showToast('Settings updated successfully! ✓')
+  } catch (error) {
+    console.error('Error updating settings:', error)
+    showToast('Failed to update settings', 'error')
   }
 }
 
 const logout = () => {
   localStorage.removeItem('access_token')
   localStorage.removeItem('refresh_token')
-  emit('navigate', 'login')
+  localStorage.removeItem('user_data')
+  showToast('Logged out successfully. See you soon! 👋')
+  setTimeout(() => {
+    emit('navigate', 'login')
+  }, 1000)
+}
+
+const changeView = (view) => {
+  currentView.value = view
+  showMobileMenu.value = false
 }
 
 onMounted(() => {
+  loadUserProfile()
   loadTasks()
 })
 </script>
 
 <template>
   <div class="min-h-screen bg-slate-50">
-    <!-- Notification Toast -->
-    <transition name="slide-down">
-      <div v-if="showNotification" class="fixed top-4 right-4 bg-white shadow-lg rounded-lg p-4 flex items-center gap-3 z-50 border-l-4 border-green-500">
-        <i class="fas fa-check-circle text-green-500 text-xl"></i>
-        <p class="text-slate-700 font-medium">{{ notificationMessage }}</p>
-      </div>
-    </transition>
-
     <!-- Header -->
-    <header class="bg-white shadow-sm border-b border-slate-200">
+    <header class="bg-white shadow-sm border-b border-slate-200 sticky top-0 z-40">
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
         <div class="flex items-center justify-between">
+          <!-- Logo and User Greeting -->
           <div class="flex items-center gap-3">
             <div class="w-10 h-10 bg-gradient-to-br from-blue-600 to-purple-600 rounded-xl flex items-center justify-center">
               <i class="fas fa-tasks text-white"></i>
             </div>
             <div>
-              <h1 class="text-2xl font-bold text-slate-800">TaskFlow</h1>
-              <p class="text-sm text-slate-500">{{ currentDate }}</p>
+              <h1 class="text-xl sm:text-2xl font-bold text-slate-800">
+                {{ greeting }}, {{ user?.first_name || user?.username || 'User' }}! 👋
+              </h1>
+              <p class="text-xs sm:text-sm text-slate-500">{{ currentDate }}</p>
             </div>
           </div>
+
+          <!-- Desktop Menu -->
+          <div class="hidden md:flex items-center gap-3">
+            <button 
+              @click="showSettingsModal = true"
+              class="flex items-center gap-2 px-4 py-2 text-slate-600 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-all"
+            >
+              <i class="fas fa-cog"></i>
+              <span>Settings</span>
+            </button>
+            <button 
+              @click="logout"
+              class="flex items-center gap-2 px-4 py-2 text-slate-600 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-all"
+            >
+              <i class="fas fa-sign-out-alt"></i>
+              <span>Logout</span>
+            </button>
+          </div>
+
+          <!-- Mobile Menu Button -->
           <button 
-            @click="logout"
-            class="flex items-center gap-2 px-4 py-2 text-slate-600 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-all"
+            @click="showMobileMenu = !showMobileMenu"
+            class="md:hidden p-2 text-slate-600 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-all"
           >
-            <i class="fas fa-sign-out-alt"></i>
-            <span class="hidden sm:inline">Logout</span>
+            <i :class="showMobileMenu ? 'fas fa-times' : 'fas fa-bars'" class="text-xl"></i>
           </button>
         </div>
+
+        <!-- Mobile Menu -->
+        <transition name="slide-down">
+          <div v-if="showMobileMenu" class="md:hidden mt-4 pb-2 border-t border-slate-200 pt-4">
+            <div class="space-y-2">
+              <button 
+                @click="showSettingsModal = true; showMobileMenu = false"
+                class="w-full flex items-center gap-3 px-4 py-3 text-slate-600 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-all"
+              >
+                <i class="fas fa-cog w-5"></i>
+                <span>Settings</span>
+              </button>
+              <button 
+                @click="showAddTaskModal = true; showMobileMenu = false"
+                class="w-full flex items-center gap-3 px-4 py-3 text-slate-600 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-all"
+              >
+                <i class="fas fa-plus w-5"></i>
+                <span>Add Task</span>
+              </button>
+              <button 
+                @click="logout"
+                class="w-full flex items-center gap-3 px-4 py-3 text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-all"
+              >
+                <i class="fas fa-sign-out-alt w-5"></i>
+                <span>Logout</span>
+              </button>
+            </div>
+          </div>
+        </transition>
       </div>
     </header>
 
     <!-- Main Content -->
-    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
       <!-- Stats Cards -->
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-        <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 mb-6 sm:mb-8">
+        <div class="bg-white rounded-xl p-4 sm:p-6 shadow-sm border border-slate-200 hover:shadow-md transition-shadow">
           <div class="flex items-center justify-between">
             <div>
-              <p class="text-slate-600 text-sm font-medium">Total Tasks</p>
-              <p class="text-3xl font-bold text-slate-800 mt-2">{{ tasks.length }}</p>
+              <p class="text-slate-600 text-xs sm:text-sm font-medium">Total</p>
+              <p class="text-2xl sm:text-3xl font-bold text-slate-800 mt-1 sm:mt-2">{{ tasks.length }}</p>
             </div>
-            <div class="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center">
-              <i class="fas fa-list text-blue-600 text-xl"></i>
+            <div class="w-10 h-10 sm:w-12 sm:h-12 bg-blue-100 rounded-xl flex items-center justify-center">
+              <i class="fas fa-list text-blue-600 text-lg sm:text-xl"></i>
             </div>
           </div>
         </div>
 
-        <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
+        <div class="bg-white rounded-xl p-4 sm:p-6 shadow-sm border border-slate-200 hover:shadow-md transition-shadow">
           <div class="flex items-center justify-between">
             <div>
-              <p class="text-slate-600 text-sm font-medium">Completed</p>
-              <p class="text-3xl font-bold text-green-600 mt-2">{{ completedCount }}</p>
+              <p class="text-slate-600 text-xs sm:text-sm font-medium">Completed</p>
+              <p class="text-2xl sm:text-3xl font-bold text-green-600 mt-1 sm:mt-2">{{ completedCount }}</p>
             </div>
-            <div class="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center">
-              <i class="fas fa-check-circle text-green-600 text-xl"></i>
+            <div class="w-10 h-10 sm:w-12 sm:h-12 bg-green-100 rounded-xl flex items-center justify-center">
+              <i class="fas fa-check-circle text-green-600 text-lg sm:text-xl"></i>
             </div>
           </div>
         </div>
 
-        <div class="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
+        <div class="bg-white rounded-xl p-4 sm:p-6 shadow-sm border border-slate-200 hover:shadow-md transition-shadow">
           <div class="flex items-center justify-between">
             <div>
-              <p class="text-slate-600 text-sm font-medium">Pending</p>
-              <p class="text-3xl font-bold text-orange-600 mt-2">{{ pendingCount }}</p>
+              <p class="text-slate-600 text-xs sm:text-sm font-medium">Pending</p>
+              <p class="text-2xl sm:text-3xl font-bold text-orange-600 mt-1 sm:mt-2">{{ pendingCount }}</p>
             </div>
-            <div class="w-12 h-12 bg-orange-100 rounded-xl flex items-center justify-center">
-              <i class="fas fa-clock text-orange-600 text-xl"></i>
+            <div class="w-10 h-10 sm:w-12 sm:h-12 bg-orange-100 rounded-xl flex items-center justify-center">
+              <i class="fas fa-clock text-orange-600 text-lg sm:text-xl"></i>
+            </div>
+          </div>
+        </div>
+
+        <div class="bg-white rounded-xl p-4 sm:p-6 shadow-sm border border-slate-200 hover:shadow-md transition-shadow">
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-slate-600 text-xs sm:text-sm font-medium">Overdue</p>
+              <p class="text-2xl sm:text-3xl font-bold text-red-600 mt-1 sm:mt-2">{{ overdueCount }}</p>
+            </div>
+            <div class="w-10 h-10 sm:w-12 sm:h-12 bg-red-100 rounded-xl flex items-center justify-center">
+              <i class="fas fa-exclamation-triangle text-red-600 text-lg sm:text-xl"></i>
             </div>
           </div>
         </div>
       </div>
 
+      <!-- Filter Tabs -->
+      <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-2 mb-6 overflow-x-auto">
+        <div class="flex gap-2 min-w-max">
+          <button 
+            @click="changeView('all')"
+            :class="[
+              'px-4 py-2 rounded-lg font-medium transition-all whitespace-nowrap',
+              currentView === 'all' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-100'
+            ]"
+          >
+            <i class="fas fa-list mr-2"></i>All Tasks
+          </button>
+          <button 
+            @click="changeView('today')"
+            :class="[
+              'px-4 py-2 rounded-lg font-medium transition-all whitespace-nowrap',
+              currentView === 'today' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-100'
+            ]"
+          >
+            <i class="fas fa-calendar-day mr-2"></i>Today
+          </button>
+          <button 
+            @click="changeView('upcoming')"
+            :class="[
+              'px-4 py-2 rounded-lg font-medium transition-all whitespace-nowrap',
+              currentView === 'upcoming' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-100'
+            ]"
+          >
+            <i class="fas fa-arrow-right mr-2"></i>Upcoming
+          </button>
+          <button 
+            @click="changeView('completed')"
+            :class="[
+              'px-4 py-2 rounded-lg font-medium transition-all whitespace-nowrap',
+              currentView === 'completed' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-100'
+            ]"
+          >
+            <i class="fas fa-check-circle mr-2"></i>Completed
+          </button>
+          <button 
+            @click="changeView('pending')"
+            :class="[
+              'px-4 py-2 rounded-lg font-medium transition-all whitespace-nowrap',
+              currentView === 'pending' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-100'
+            ]"
+          >
+            <i class="fas fa-hourglass-half mr-2"></i>Pending
+          </button>
+        </div>
+      </div>
+
       <!-- Tasks Section -->
-      <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+      <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-4 sm:p-6">
         <div class="flex items-center justify-between mb-6">
-          <h2 class="text-xl font-bold text-slate-800">My Tasks</h2>
+          <h2 class="text-lg sm:text-xl font-bold text-slate-800">
+            {{ currentView === 'all' ? 'All Tasks' : currentView.charAt(0).toUpperCase() + currentView.slice(1) }}
+          </h2>
           <button 
             @click="showAddTaskModal = true"
-            class="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg hover:from-blue-700 hover:to-purple-700 transition-all shadow-md"
+            class="flex items-center gap-2 px-3 sm:px-4 py-2 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg hover:from-blue-700 hover:to-purple-700 transition-all shadow-md text-sm sm:text-base"
           >
             <i class="fas fa-plus"></i>
-            <span>Add Task</span>
+            <span class="hidden sm:inline">Add Task</span>
+          </button>
+        </div>
+
+        <!-- Loading State -->
+        <div v-if="isLoading" class="text-center py-12">
+          <div class="relative inline-block">
+            <i class="fas fa-spinner fa-spin text-4xl text-blue-600 mb-4"></i>
+          </div>
+          
+          <div v-if="isWakingUp" class="mt-6 max-w-md mx-auto">
+            <p class="text-slate-800 font-semibold mb-2">Waking up the server...</p>
+            <p class="text-sm text-slate-600 mb-4">
+              This may take 30-60 seconds on first load
+            </p>
+            
+            <div class="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
+              <div 
+                class="h-full bg-gradient-to-r from-blue-600 to-purple-600 transition-all duration-1000"
+                :style="{ width: wakeUpProgress + '%' }"
+              ></div>
+            </div>
+            
+            <p class="text-xs text-slate-500 mt-3">
+              💡 Server sleeps after 15 minutes of inactivity
+            </p>
+          </div>
+          
+          <p v-else class="text-slate-600 mt-4">Loading tasks...</p>
+        </div>
+
+        <!-- Empty State -->
+        <div v-else-if="filteredTasks.length === 0" class="text-center py-12">
+          <i class="fas fa-inbox text-5xl text-slate-300 mb-4"></i>
+          <p class="text-slate-600 text-lg font-medium mb-2">No tasks found</p>
+          <p class="text-slate-500 text-sm mb-4">
+            {{ currentView === 'all' ? 'Create your first task to get started!' : `No ${currentView} tasks at the moment.` }}
+          </p>
+          <button 
+            @click="showAddTaskModal = true"
+            class="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all"
+          >
+            <i class="fas fa-plus"></i>
+            Add Your First Task
           </button>
         </div>
 
         <!-- Task List -->
-        <div v-if="isLoading" class="text-center py-8">
-          <i class="fas fa-spinner fa-spin text-3xl text-blue-600"></i>
-          <p class="text-slate-600 mt-4">Loading tasks...</p>
-        </div>
-
-        <div v-else-if="tasks.length === 0" class="text-center py-12">
-          <i class="fas fa-inbox text-5xl text-slate-300 mb-4"></i>
-          <p class="text-slate-600">No tasks yet. Create your first task!</p>
-        </div>
-
         <div v-else class="space-y-3">
           <div 
-            v-for="task in tasks" 
+            v-for="task in filteredTasks" 
             :key="task.id"
-            class="flex items-center gap-4 p-4 border border-slate-200 rounded-lg hover:bg-slate-50 transition-all task-appear"
+            class="flex items-start gap-3 sm:gap-4 p-3 sm:p-4 border border-slate-200 rounded-lg hover:bg-slate-50 transition-all task-appear"
           >
-            <div class="custom-checkbox">
+            <div class="custom-checkbox mt-1">
               <input 
                 type="checkbox" 
                 :checked="task.status === 'completed'"
                 @change="toggleTask(task.id)"
                 class="hidden"
               >
-              <div class="w-6 h-6 border-2 border-slate-300 rounded-md cursor-pointer flex items-center justify-center">
+              <div class="w-5 h-5 sm:w-6 sm:h-6 border-2 border-slate-300 rounded-md cursor-pointer flex items-center justify-center hover:border-blue-500 transition-colors">
                 <i v-if="task.status === 'completed'" class="fas fa-check text-white text-xs"></i>
               </div>
             </div>
 
-            <div class="flex-1">
+            <div class="flex-1 min-w-0">
               <h3 
                 :class="[
-                  'font-semibold text-slate-800',
+                  'font-semibold text-slate-800 text-sm sm:text-base',
                   task.status === 'completed' && 'line-through text-slate-400'
                 ]"
               >
                 {{ task.title }}
               </h3>
-              <p v-if="task.description" class="text-sm text-slate-600 mt-1">{{ task.description }}</p>
-              <div class="flex items-center gap-3 mt-2">
+              <p v-if="task.description" class="text-xs sm:text-sm text-slate-600 mt-1 line-clamp-2">
+                {{ task.description }}
+              </p>
+              <div class="flex flex-wrap items-center gap-2 mt-2">
                 <span class="text-xs text-slate-500 flex items-center gap-1">
                   <i class="fas fa-calendar"></i>
                   {{ formatDate(task.date) }}
@@ -286,7 +533,7 @@ onMounted(() => {
                 </span>
                 <span 
                   :class="[
-                    'text-xs px-2 py-1 rounded-full',
+                    'text-xs px-2 py-1 rounded-full font-medium',
                     task.priority === 'urgent' && 'bg-red-100 text-red-700',
                     task.priority === 'high' && 'bg-orange-100 text-orange-700',
                     task.priority === 'medium' && 'bg-blue-100 text-blue-700',
@@ -300,9 +547,9 @@ onMounted(() => {
 
             <button 
               @click="deleteTask(task.id)"
-              class="text-red-500 hover:text-red-700 p-2 hover:bg-red-50 rounded-lg transition-all"
+              class="text-red-500 hover:text-red-700 p-2 hover:bg-red-50 rounded-lg transition-all flex-shrink-0"
             >
-              <i class="fas fa-trash"></i>
+              <i class="fas fa-trash text-sm"></i>
             </button>
           </div>
         </div>
@@ -310,88 +557,211 @@ onMounted(() => {
     </main>
 
     <!-- Add Task Modal -->
-    <div 
-      v-if="showAddTaskModal"
-      class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50"
-      @click.self="showAddTaskModal = false"
+    <teleport to="body">
+      <transition name="modal">
+        <div 
+          v-if="showAddTaskModal"
+          class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50"
+          @click.self="showAddTaskModal = false"
+        >
+          <div class="bg-white rounded-2xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
+            <div class="flex items-center justify-between mb-6">
+              <h3 class="text-2xl font-bold text-slate-800">Add New Task</h3>
+              <button 
+                @click="showAddTaskModal = false"
+                class="text-slate-400 hover:text-slate-600 p-1"
+              >
+                <i class="fas fa-times text-xl"></i>
+              </button>
+            </div>
+            
+            <form @submit.prevent="addTask" class="space-y-4">
+              <div>
+                <label class="block text-sm font-medium text-slate-700 mb-2">Title *</label>
+                <input 
+                  v-model="newTask.title"
+                  type="text" 
+                  class="w-full px-4 py-3 rounded-lg border border-slate-200 focus:border-blue-500 focus:ring-4 focus:ring-blue-50 transition-all outline-none" 
+                  placeholder="Task title" 
+                  required
+                >
+              </div>
+
+              <div>
+                <label class="block text-sm font-medium text-slate-700 mb-2">Description</label>
+                <textarea 
+                  v-model="newTask.description"
+                  class="w-full px-4 py-3 rounded-lg border border-slate-200 focus:border-blue-500 focus:ring-4 focus:ring-blue-50 transition-all outline-none resize-none" 
+                  rows="3"
+                  placeholder="Task description"
+                ></textarea>
+              </div>
+
+              <div class="grid grid-cols-2 gap-4">
+                <div>
+                  <label class="block text-sm font-medium text-slate-700 mb-2">Date *</label>
+                  <input 
+                    v-model="newTask.date"
+                    type="date" 
+                    class="w-full px-4 py-3 rounded-lg border border-slate-200 focus:border-blue-500 focus:ring-4 focus:ring-blue-50 transition-all outline-none" 
+                    required
+                  >
+                </div>
+
+                <div>
+                  <label class="block text-sm font-medium text-slate-700 mb-2">Time</label>
+                  <input 
+                    v-model="newTask.time"
+                    type="time" 
+                    class="w-full px-4 py-3 rounded-lg border border-slate-200 focus:border-blue-500 focus:ring-4 focus:ring-blue-50 transition-all outline-none"
+                  >
+                </div>
+              </div>
+
+              <div>
+                <label class="block text-sm font-medium text-slate-700 mb-2">Priority</label>
+                <select 
+                  v-model="newTask.priority"
+                  class="w-full px-4 py-3 rounded-lg border border-slate-200 focus:border-blue-500 focus:ring-4 focus:ring-blue-50 transition-all outline-none"
+                >
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                  <option value="urgent">Urgent</option>
+                </select>
+              </div>
+
+              <div class="flex gap-3 mt-6">
+                <button 
+                  type="button"
+                  @click="showAddTaskModal = false"
+                  class="flex-1 py-3 px-4 bg-slate-200 text-slate-700 font-semibold rounded-lg hover:bg-slate-300 transition-all"
+                >
+                  Cancel
+                </button>
+                <button 
+                  type="submit"
+                  class="flex-1 py-3 px-4 bg-gradient-to-r from-blue-600 to-purple-600 text-white font-semibold rounded-lg hover:from-blue-700 hover:to-purple-700 transition-all shadow-lg"
+                >
+                  Add Task
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </transition>
+    </teleport>
+
+    <!-- Settings Modal -->
+    <teleport to="body">
+      <transition name="modal">
+        <div 
+          v-if="showSettingsModal"
+          class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50"
+          @click.self="showSettingsModal = false"
+        >
+          <div class="bg-white rounded-2xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
+            <div class="flex items-center justify-between mb-6">
+              <h3 class="text-2xl font-bold text-slate-800">Settings</h3>
+              <button 
+                @click="showSettingsModal = false"
+                class="text-slate-400 hover:text-slate-600 p-1"
+              >
+                <i class="fas fa-times text-xl"></i>
+              </button>
+            </div>
+            
+            <form @submit.prevent="updateSettings" class="space-y-4">
+              <div>
+                <label class="block text-sm font-medium text-slate-700 mb-2">
+                  <i class="fas fa-user mr-2 text-slate-400"></i>First Name
+                </label>
+                <input 
+                  v-model="userSettings.first_name"
+                  type="text" 
+                  class="w-full px-4 py-3 rounded-lg border border-slate-200 focus:border-blue-500 focus:ring-4 focus:ring-blue-50 transition-all outline-none" 
+                  placeholder="First name"
+                >
+              </div>
+
+              <div>
+                <label class="block text-sm font-medium text-slate-700 mb-2">
+                  <i class="fas fa-user mr-2 text-slate-400"></i>Last Name
+                </label>
+                <input 
+                  v-model="userSettings.last_name"
+                  type="text" 
+                  class="w-full px-4 py-3 rounded-lg border border-slate-200 focus:border-blue-500 focus:ring-4 focus:ring-blue-50 transition-all outline-none" 
+                  placeholder="Last name"
+                >
+              </div>
+
+              <div>
+                <label class="block text-sm font-medium text-slate-700 mb-2">
+                  <i class="fas fa-at mr-2 text-slate-400"></i>Username
+                </label>
+                <input 
+                  v-model="userSettings.username"
+                  type="text" 
+                  class="w-full px-4 py-3 rounded-lg border border-slate-200 bg-slate-50 cursor-not-allowed" 
+                  disabled
+                >
+                <p class="text-xs text-slate-500 mt-1">Username cannot be changed</p>
+              </div>
+
+              <div>
+                <label class="block text-sm font-medium text-slate-700 mb-2">
+                  <i class="fas fa-envelope mr-2 text-slate-400"></i>Email
+                </label>
+                <input 
+                  v-model="userSettings.email"
+                  type="email" 
+                  class="w-full px-4 py-3 rounded-lg border border-slate-200 focus:border-blue-500 focus:ring-4 focus:ring-blue-50 transition-all outline-none" 
+                  placeholder="Email address"
+                >
+              </div>
+
+              <div class="flex gap-3 mt-6">
+                <button 
+                  type="button"
+                  @click="showSettingsModal = false"
+                  class="flex-1 py-3 px-4 bg-slate-200 text-slate-700 font-semibold rounded-lg hover:bg-slate-300 transition-all"
+                >
+                  Cancel
+                </button>
+                <button 
+                  type="submit"
+                  class="flex-1 py-3 px-4 bg-gradient-to-r from-blue-600 to-purple-600 text-white font-semibold rounded-lg hover:from-blue-700 hover:to-purple-700 transition-all shadow-lg"
+                >
+                  Save Changes
+                </button>
+              </div>
+            </form>
+
+            <!-- Additional Info -->
+            <div class="mt-6 p-4 bg-slate-50 rounded-lg">
+              <h4 class="font-semibold text-slate-700 mb-2 flex items-center gap-2">
+                <i class="fas fa-info-circle text-blue-500"></i>
+                Account Info
+              </h4>
+              <div class="space-y-1 text-sm text-slate-600">
+                <p><strong>Username:</strong> {{ user?.username }}</p>
+                <p><strong>Email:</strong> {{ user?.email }}</p>
+                <p><strong>Tasks:</strong> {{ tasks.length }} total</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </transition>
+    </teleport>
+
+    <!-- Floating Add Button (Mobile) -->
+    <button 
+      @click="showAddTaskModal = true"
+      class="md:hidden fixed bottom-6 right-6 w-14 h-14 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-full shadow-lg hover:shadow-xl transition-all flex items-center justify-center z-30"
     >
-      <div class="bg-white rounded-2xl p-6 w-full max-w-md">
-        <h3 class="text-2xl font-bold text-slate-800 mb-6">Add New Task</h3>
-        
-        <form @submit.prevent="addTask" class="space-y-4">
-          <div>
-            <label class="block text-sm font-medium text-slate-700 mb-2">Title</label>
-            <input 
-              v-model="newTask.title"
-              type="text" 
-              class="w-full px-4 py-3 rounded-lg border border-slate-200 focus:border-blue-500 focus:ring-4 focus:ring-blue-50 transition-all outline-none" 
-              placeholder="Task title" 
-              required
-            >
-          </div>
-
-          <div>
-            <label class="block text-sm font-medium text-slate-700 mb-2">Description</label>
-            <textarea 
-              v-model="newTask.description"
-              class="w-full px-4 py-3 rounded-lg border border-slate-200 focus:border-blue-500 focus:ring-4 focus:ring-blue-50 transition-all outline-none resize-none" 
-              rows="3"
-              placeholder="Task description"
-            ></textarea>
-          </div>
-
-          <div class="grid grid-cols-2 gap-4">
-            <div>
-              <label class="block text-sm font-medium text-slate-700 mb-2">Date</label>
-              <input 
-                v-model="newTask.date"
-                type="date" 
-                class="w-full px-4 py-3 rounded-lg border border-slate-200 focus:border-blue-500 focus:ring-4 focus:ring-blue-50 transition-all outline-none" 
-                required
-              >
-            </div>
-
-            <div>
-              <label class="block text-sm font-medium text-slate-700 mb-2">Time</label>
-              <input 
-                v-model="newTask.time"
-                type="time" 
-                class="w-full px-4 py-3 rounded-lg border border-slate-200 focus:border-blue-500 focus:ring-4 focus:ring-blue-50 transition-all outline-none"
-              >
-            </div>
-          </div>
-
-          <div>
-            <label class="block text-sm font-medium text-slate-700 mb-2">Priority</label>
-            <select 
-              v-model="newTask.priority"
-              class="w-full px-4 py-3 rounded-lg border border-slate-200 focus:border-blue-500 focus:ring-4 focus:ring-blue-50 transition-all outline-none"
-            >
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
-              <option value="urgent">Urgent</option>
-            </select>
-          </div>
-
-          <div class="flex gap-3 mt-6">
-            <button 
-              type="button"
-              @click="showAddTaskModal = false"
-              class="flex-1 py-3 px-4 bg-slate-200 text-slate-700 font-semibold rounded-lg hover:bg-slate-300 transition-all"
-            >
-              Cancel
-            </button>
-            <button 
-              type="submit"
-              class="flex-1 py-3 px-4 bg-gradient-to-r from-blue-600 to-purple-600 text-white font-semibold rounded-lg hover:from-blue-700 hover:to-purple-700 transition-all shadow-lg"
-            >
-              Add Task
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+      <i class="fas fa-plus text-xl"></i>
+    </button>
   </div>
 </template>
 
@@ -401,13 +771,28 @@ onMounted(() => {
   transition: all 0.3s ease;
 }
 
-.slide-down-enter-from {
-  transform: translateY(-100%);
+.slide-down-enter-from,
+.slide-down-leave-to {
+  transform: translateY(-10px);
   opacity: 0;
 }
 
-.slide-down-leave-to {
-  transform: translateY(-100%);
+.modal-enter-active,
+.modal-leave-active {
+  transition: all 0.3s ease;
+}
+
+.modal-enter-from,
+.modal-leave-to {
   opacity: 0;
+  transform: scale(0.95);
+}
+
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 </style>

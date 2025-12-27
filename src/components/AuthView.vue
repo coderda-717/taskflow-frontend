@@ -6,7 +6,7 @@ const props = defineProps({
   type: String
 })
 
-const emit = defineEmits(['navigate'])
+const emit = defineEmits(['navigate', 'showToast'])
 
 const isLogin = computed(() => props.type === 'login')
 const isLoading = ref(false)
@@ -34,8 +34,21 @@ const handleSubmit = async () => {
       localStorage.setItem('access_token', response.data.access)
       localStorage.setItem('refresh_token', response.data.refresh)
 
-      // Navigate to dashboard
-      emit('navigate', 'dashboard')
+      // Get user profile to store username and other details
+      const profileResponse = await api.auth.getProfile()
+      const userData = profileResponse.data
+      localStorage.setItem('user_data', JSON.stringify(userData))
+
+      // Show success toast
+      emit('showToast', {
+        message: `Welcome back, ${userData.first_name || userData.username}! 🎉`,
+        type: 'success'
+      })
+
+      // Navigate to dashboard after short delay
+      setTimeout(() => {
+        emit('navigate', 'dashboard')
+      }, 1000)
     } else {
       // Register
       const names = name.value.split(' ')
@@ -60,16 +73,44 @@ const handleSubmit = async () => {
       localStorage.setItem('access_token', loginResponse.data.access)
       localStorage.setItem('refresh_token', loginResponse.data.refresh)
 
-      emit('navigate', 'dashboard')
+      // Get user profile
+      const profileResponse = await api.auth.getProfile()
+      const userData = profileResponse.data
+      localStorage.setItem('user_data', JSON.stringify(userData))
+
+      // Show success toast
+      emit('showToast', {
+        message: `Account created successfully! Welcome, ${userData.first_name || userData.username}! 🎉`,
+        type: 'success'
+      })
+
+      // Navigate to dashboard
+      setTimeout(() => {
+        emit('navigate', 'dashboard')
+      }, 1000)
     }
   } catch (err) {
     console.error('Authentication error:', err)
+    let errorMessage = 'An error occurred. Please try again.'
+    
     if (err.response?.data) {
       const errors = err.response.data
-      error.value = Object.values(errors).flat().join(', ')
-    } else {
-      error.value = 'An error occurred. Please try again.'
+      if (errors.detail) {
+        errorMessage = errors.detail
+      } else {
+        errorMessage = Object.values(errors).flat().join(', ')
+      }
+    } else if (err.message) {
+      errorMessage = err.message
     }
+    
+    error.value = errorMessage
+    
+    // Show error toast
+    emit('showToast', {
+      message: errorMessage,
+      type: 'error'
+    })
   } finally {
     isLoading.value = false
   }
@@ -81,7 +122,7 @@ const handleSubmit = async () => {
     <div class="w-full max-w-md">
       <!-- Logo/Brand -->
       <div class="text-center mb-8 fade-in">
-        <div class="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-blue-600 to-purple-600 rounded-2xl mb-4 shadow-lg">
+        <div class="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-blue-600 to-purple-600 rounded-2xl mb-4 shadow-lg transform hover:scale-105 transition-transform">
           <i class="fas fa-tasks text-2xl text-white"></i>
         </div>
         <h1 class="text-3xl font-bold text-slate-800">TaskFlow</h1>
@@ -118,15 +159,20 @@ const handleSubmit = async () => {
         </h2>
 
         <!-- Error Message -->
-        <div v-if="error" class="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
-          <p class="text-sm text-red-600">{{ error }}</p>
+        <div v-if="error" class="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg animate-shake">
+          <div class="flex items-center gap-2">
+            <i class="fas fa-exclamation-circle text-red-600"></i>
+            <p class="text-sm text-red-600">{{ error }}</p>
+          </div>
         </div>
 
         <!-- Form -->
         <form @submit.prevent="handleSubmit" class="space-y-4">
           <!-- Name (Sign Up only) -->
-          <div v-if="!isLogin">
-            <label class="block text-sm font-medium text-slate-700 mb-2">Full Name</label>
+          <div v-if="!isLogin" class="form-group">
+            <label class="block text-sm font-medium text-slate-700 mb-2">
+              <i class="fas fa-user text-slate-400 mr-2"></i>Full Name
+            </label>
             <input 
               v-model="name"
               type="text" 
@@ -137,8 +183,10 @@ const handleSubmit = async () => {
           </div>
 
           <!-- Username -->
-          <div>
-            <label class="block text-sm font-medium text-slate-700 mb-2">Username</label>
+          <div class="form-group">
+            <label class="block text-sm font-medium text-slate-700 mb-2">
+              <i class="fas fa-at text-slate-400 mr-2"></i>Username
+            </label>
             <input 
               v-model="username"
               type="text" 
@@ -149,8 +197,10 @@ const handleSubmit = async () => {
           </div>
 
           <!-- Email (Sign Up only) -->
-          <div v-if="!isLogin">
-            <label class="block text-sm font-medium text-slate-700 mb-2">Email</label>
+          <div v-if="!isLogin" class="form-group">
+            <label class="block text-sm font-medium text-slate-700 mb-2">
+              <i class="fas fa-envelope text-slate-400 mr-2"></i>Email
+            </label>
             <input 
               v-model="email"
               type="email" 
@@ -161,8 +211,10 @@ const handleSubmit = async () => {
           </div>
 
           <!-- Password -->
-          <div>
-            <label class="block text-sm font-medium text-slate-700 mb-2">Password</label>
+          <div class="form-group">
+            <label class="block text-sm font-medium text-slate-700 mb-2">
+              <i class="fas fa-lock text-slate-400 mr-2"></i>Password
+            </label>
             <input 
               v-model="password"
               type="password" 
@@ -176,9 +228,12 @@ const handleSubmit = async () => {
           <button 
             type="submit"
             :disabled="isLoading"
-            class="w-full py-3 px-4 bg-gradient-to-r from-blue-600 to-purple-600 text-white font-semibold rounded-lg hover:from-blue-700 hover:to-purple-700 focus:ring-4 focus:ring-blue-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
+            class="w-full py-3 px-4 bg-gradient-to-r from-blue-600 to-purple-600 text-white font-semibold rounded-lg hover:from-blue-700 hover:to-purple-700 focus:ring-4 focus:ring-blue-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
           >
-            <span v-if="!isLoading">{{ isLogin ? 'Login' : 'Create Account' }}</span>
+            <span v-if="!isLoading" class="flex items-center justify-center gap-2">
+              {{ isLogin ? 'Login' : 'Create Account' }}
+              <i :class="isLogin ? 'fas fa-sign-in-alt' : 'fas fa-user-plus'"></i>
+            </span>
             <span v-else class="flex items-center justify-center">
               <i class="fas fa-spinner fa-spin mr-2"></i>
               Processing...
@@ -191,12 +246,44 @@ const handleSubmit = async () => {
           {{ isLogin ? "Don't have an account?" : "Already have an account?" }}
           <button 
             @click="emit('navigate', isLogin ? 'register' : 'login')"
-            class="text-blue-600 hover:text-blue-700 font-medium ml-1"
+            class="text-blue-600 hover:text-blue-700 font-medium ml-1 hover:underline"
           >
             {{ isLogin ? 'Sign Up' : 'Login' }}
           </button>
         </p>
       </div>
+
+      <!-- Additional Info -->
+      <div class="text-center mt-6 text-sm text-slate-500">
+        <p>🔒 Your data is secure and encrypted</p>
+      </div>
     </div>
   </div>
 </template>
+
+<style scoped>
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); }
+  20%, 40%, 60%, 80% { transform: translateX(5px); }
+}
+
+.animate-shake {
+  animation: shake 0.5s;
+}
+
+.form-group {
+  animation: slideInUp 0.3s ease-out;
+}
+
+@keyframes slideInUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+</style>
