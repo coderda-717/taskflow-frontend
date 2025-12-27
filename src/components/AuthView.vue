@@ -65,7 +65,6 @@ const handleSubmit = async () => {
   } catch (err) {
     console.error('Authentication error:', err)
     if (err.response?.data) {
-      // Extract error messages from Django response
       const errors = err.response.data
       error.value = Object.values(errors).flat().join(', ')
     } else {
@@ -78,22 +77,126 @@ const handleSubmit = async () => {
 </script>
 
 <template>
-  <!-- Add error display after the title -->
-  <div v-if="error" class="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
-    <p class="text-sm text-red-600">{{ error }}</p>
-  </div>
+  <div class="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-purple-50 px-4 py-8">
+    <div class="w-full max-w-md">
+      <!-- Logo/Brand -->
+      <div class="text-center mb-8 fade-in">
+        <div class="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-blue-600 to-purple-600 rounded-2xl mb-4 shadow-lg">
+          <i class="fas fa-tasks text-2xl text-white"></i>
+        </div>
+        <h1 class="text-3xl font-bold text-slate-800">TaskFlow</h1>
+        <p class="text-slate-600 mt-2">Organize your tasks efficiently</p>
+      </div>
 
-  <!-- Add username field for both login and signup -->
-  <div>
-    <label class="block text-sm font-medium text-slate-700 mb-2">Username</label>
-    <input 
-      v-model="username"
-      type="text" 
-      class="w-full px-4 py-3 rounded-lg border border-slate-200 focus:border-blue-500 focus:ring-4 focus:ring-blue-50 transition-all outline-none" 
-      placeholder="Enter your username" 
-      required
-    >
-  </div>
+      <!-- Auth Card -->
+      <div class="bg-white rounded-2xl shadow-xl p-8 slide-up">
+        <!-- Tabs -->
+        <div class="flex gap-2 mb-6 bg-slate-100 p-1 rounded-lg">
+          <button 
+            @click="emit('navigate', 'login')"
+            :class="[
+              'flex-1 py-2 px-4 rounded-lg font-medium transition-all',
+              isLogin ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-600 hover:text-slate-800'
+            ]"
+          >
+            Login
+          </button>
+          <button 
+            @click="emit('navigate', 'register')"
+            :class="[
+              'flex-1 py-2 px-4 rounded-lg font-medium transition-all',
+              !isLogin ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-600 hover:text-slate-800'
+            ]"
+          >
+            Sign Up
+          </button>
+        </div>
 
-  <!-- Keep existing form fields -->
+        <!-- Title -->
+        <h2 class="text-2xl font-bold text-slate-800 mb-6">
+          {{ isLogin ? 'Welcome Back' : 'Create Account' }}
+        </h2>
+
+        <!-- Error Message -->
+        <div v-if="error" class="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+          <p class="text-sm text-red-600">{{ error }}</p>
+        </div>
+
+        <!-- Form -->
+        <form @submit.prevent="handleSubmit" class="space-y-4">
+          <!-- Name (Sign Up only) -->
+          <div v-if="!isLogin">
+            <label class="block text-sm font-medium text-slate-700 mb-2">Full Name</label>
+            <input 
+              v-model="name"
+              type="text" 
+              class="w-full px-4 py-3 rounded-lg border border-slate-200 focus:border-blue-500 focus:ring-4 focus:ring-blue-50 transition-all outline-none" 
+              placeholder="John Doe" 
+              required
+            >
+          </div>
+
+          <!-- Username -->
+          <div>
+            <label class="block text-sm font-medium text-slate-700 mb-2">Username</label>
+            <input 
+              v-model="username"
+              type="text" 
+              class="w-full px-4 py-3 rounded-lg border border-slate-200 focus:border-blue-500 focus:ring-4 focus:ring-blue-50 transition-all outline-none" 
+              placeholder="Enter your username" 
+              required
+            >
+          </div>
+
+          <!-- Email (Sign Up only) -->
+          <div v-if="!isLogin">
+            <label class="block text-sm font-medium text-slate-700 mb-2">Email</label>
+            <input 
+              v-model="email"
+              type="email" 
+              class="w-full px-4 py-3 rounded-lg border border-slate-200 focus:border-blue-500 focus:ring-4 focus:ring-blue-50 transition-all outline-none" 
+              placeholder="your@email.com" 
+              required
+            >
+          </div>
+
+          <!-- Password -->
+          <div>
+            <label class="block text-sm font-medium text-slate-700 mb-2">Password</label>
+            <input 
+              v-model="password"
+              type="password" 
+              class="w-full px-4 py-3 rounded-lg border border-slate-200 focus:border-blue-500 focus:ring-4 focus:ring-blue-50 transition-all outline-none" 
+              placeholder="••••••••" 
+              required
+            >
+          </div>
+
+          <!-- Submit Button -->
+          <button 
+            type="submit"
+            :disabled="isLoading"
+            class="w-full py-3 px-4 bg-gradient-to-r from-blue-600 to-purple-600 text-white font-semibold rounded-lg hover:from-blue-700 hover:to-purple-700 focus:ring-4 focus:ring-blue-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
+          >
+            <span v-if="!isLoading">{{ isLogin ? 'Login' : 'Create Account' }}</span>
+            <span v-else class="flex items-center justify-center">
+              <i class="fas fa-spinner fa-spin mr-2"></i>
+              Processing...
+            </span>
+          </button>
+        </form>
+
+        <!-- Footer -->
+        <p class="text-center text-sm text-slate-600 mt-6">
+          {{ isLogin ? "Don't have an account?" : "Already have an account?" }}
+          <button 
+            @click="emit('navigate', isLogin ? 'register' : 'login')"
+            class="text-blue-600 hover:text-blue-700 font-medium ml-1"
+          >
+            {{ isLogin ? 'Sign Up' : 'Login' }}
+          </button>
+        </p>
+      </div>
+    </div>
+  </div>
 </template>

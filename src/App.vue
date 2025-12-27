@@ -17,3 +17,24 @@ onMounted(() => {
   }
 })
 </script>
+
+<template>
+  <div id="app">
+    <AuthView 
+      v-if="currentView === 'login' || currentView === 'register'"
+      :type="currentView"
+      @navigate="navigate"
+    />
+    <Dashboard 
+      v-else-if="currentView === 'dashboard'"
+      @navigate="navigate"
+    />
+  </div>
+</template>
+
+<style>
+#app {
+  width: 100%;
+  min-height: 100vh;
+}
+</style>
