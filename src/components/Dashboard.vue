@@ -10,8 +10,6 @@ const showAddTaskModal = ref(false)
 const showSettingsModal = ref(false)
 const showMobileMenu = ref(false)
 const isLoading = ref(false)
-const isWakingUp = ref(false)
-const wakeUpProgress = ref(0)
 const user = ref(null)
 
 const newTask = ref({
@@ -73,6 +71,12 @@ const greeting = computed(() => {
   return 'Good evening'
 })
 
+const userName = computed(() => {
+  if (user.value?.first_name) return user.value.first_name
+  if (user.value?.username) return user.value.username
+  return 'User'
+})
+
 const showToast = (message, type = 'success') => {
   emit('showToast', { message, type })
 }
@@ -92,63 +96,36 @@ const formatDate = (dateStr) => {
   }
 }
 
-const animateWakeUp = () => {
-  wakeUpProgress.value = 0
-  const interval = setInterval(() => {
-    if (wakeUpProgress.value < 90 && isWakingUp.value) {
-      wakeUpProgress.value += 10
-    } else if (!isWakingUp.value) {
-      wakeUpProgress.value = 100
-      clearInterval(interval)
-    }
-  }, 1000)
-}
-
 const loadTasks = async () => {
   isLoading.value = true
-  const startTime = Date.now()
-  
-  const wakeUpTimer = setTimeout(() => {
-    isWakingUp.value = true
-    animateWakeUp()
-  }, 2000)
   
   try {
     const response = await api.tasks.getAll()
     tasks.value = response.data
-    
-    const loadTime = Date.now() - startTime
-    clearTimeout(wakeUpTimer)
-    
-    if (loadTime > 5000) {
-      showToast('Server was sleeping - now awake! 🚀')
-    }
-    
-    isWakingUp.value = false
-    wakeUpProgress.value = 100
   } catch (error) {
     console.error('Error loading tasks:', error)
-    clearTimeout(wakeUpTimer)
-    isWakingUp.value = false
     showToast('Failed to load tasks', 'error')
   } finally {
     isLoading.value = false
-    setTimeout(() => {
-      isWakingUp.value = false
-    }, 500)
   }
 }
 
 const loadUserProfile = () => {
-  const userData = localStorage.getItem('user_data')
-  if (userData) {
-    user.value = JSON.parse(userData)
-    userSettings.value = {
-      first_name: user.value.first_name || '',
-      last_name: user.value.last_name || '',
-      email: user.value.email || '',
-      username: user.value.username || ''
+  try {
+    const userData = localStorage.getItem('user_data')
+    if (userData) {
+      user.value = JSON.parse(userData)
+      userSettings.value = {
+        first_name: user.value.first_name || '',
+        last_name: user.value.last_name || '',
+        email: user.value.email || '',
+        username: user.value.username || ''
+      }
     }
+  } catch (error) {
+    console.error('Error loading user profile:', error)
+    // Set default user if data is corrupted
+    user.value = { username: 'User' }
   }
 }
 
@@ -265,7 +242,7 @@ onMounted(() => {
             </div>
             <div>
               <h1 class="text-xl sm:text-2xl font-bold text-slate-800">
-                {{ greeting }}, {{ user?.first_name || user?.username || 'User' }}! 👋
+                {{ greeting }}, {{ userName }}! 👋
               </h1>
               <p class="text-xs sm:text-sm text-slate-500">{{ currentDate }}</p>
             </div>
@@ -388,16 +365,16 @@ onMounted(() => {
           <button 
             @click="changeView('all')"
             :class="[
-              'px-4 py-2 rounded-lg font-medium transition-all whitespace-nowrap',
+              'px-4 py-2 rounded-lg font-medium transition-all whitespace-nowrap text-sm',
               currentView === 'all' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-100'
             ]"
           >
-            <i class="fas fa-list mr-2"></i>All Tasks
+            <i class="fas fa-list mr-2"></i>All
           </button>
           <button 
             @click="changeView('today')"
             :class="[
-              'px-4 py-2 rounded-lg font-medium transition-all whitespace-nowrap',
+              'px-4 py-2 rounded-lg font-medium transition-all whitespace-nowrap text-sm',
               currentView === 'today' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-100'
             ]"
           >
@@ -406,7 +383,7 @@ onMounted(() => {
           <button 
             @click="changeView('upcoming')"
             :class="[
-              'px-4 py-2 rounded-lg font-medium transition-all whitespace-nowrap',
+              'px-4 py-2 rounded-lg font-medium transition-all whitespace-nowrap text-sm',
               currentView === 'upcoming' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-100'
             ]"
           >
@@ -415,16 +392,16 @@ onMounted(() => {
           <button 
             @click="changeView('completed')"
             :class="[
-              'px-4 py-2 rounded-lg font-medium transition-all whitespace-nowrap',
+              'px-4 py-2 rounded-lg font-medium transition-all whitespace-nowrap text-sm',
               currentView === 'completed' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-100'
             ]"
           >
-            <i class="fas fa-check-circle mr-2"></i>Completed
+            <i class="fas fa-check-circle mr-2"></i>Done
           </button>
           <button 
             @click="changeView('pending')"
             :class="[
-              'px-4 py-2 rounded-lg font-medium transition-all whitespace-nowrap',
+              'px-4 py-2 rounded-lg font-medium transition-all whitespace-nowrap text-sm',
               currentView === 'pending' ? 'bg-blue-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-100'
             ]"
           >
@@ -450,29 +427,8 @@ onMounted(() => {
 
         <!-- Loading State -->
         <div v-if="isLoading" class="text-center py-12">
-          <div class="relative inline-block">
-            <i class="fas fa-spinner fa-spin text-4xl text-blue-600 mb-4"></i>
-          </div>
-          
-          <div v-if="isWakingUp" class="mt-6 max-w-md mx-auto">
-            <p class="text-slate-800 font-semibold mb-2">Waking up the server...</p>
-            <p class="text-sm text-slate-600 mb-4">
-              This may take 30-60 seconds on first load
-            </p>
-            
-            <div class="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
-              <div 
-                class="h-full bg-gradient-to-r from-blue-600 to-purple-600 transition-all duration-1000"
-                :style="{ width: wakeUpProgress + '%' }"
-              ></div>
-            </div>
-            
-            <p class="text-xs text-slate-500 mt-3">
-              💡 Server sleeps after 15 minutes of inactivity
-            </p>
-          </div>
-          
-          <p v-else class="text-slate-600 mt-4">Loading tasks...</p>
+          <i class="fas fa-spinner fa-spin text-4xl text-blue-600 mb-4"></i>
+          <p class="text-slate-600 mt-4">Loading tasks...</p>
         </div>
 
         <!-- Empty State -->
@@ -496,7 +452,7 @@ onMounted(() => {
           <div 
             v-for="task in filteredTasks" 
             :key="task.id"
-            class="flex items-start gap-3 sm:gap-4 p-3 sm:p-4 border border-slate-200 rounded-lg hover:bg-slate-50 transition-all task-appear"
+            class="flex items-start gap-3 sm:gap-4 p-3 sm:p-4 border border-slate-200 rounded-lg hover:bg-slate-50 transition-all"
           >
             <div class="custom-checkbox mt-1">
               <input 
@@ -519,7 +475,7 @@ onMounted(() => {
               >
                 {{ task.title }}
               </h3>
-              <p v-if="task.description" class="text-xs sm:text-sm text-slate-600 mt-1 line-clamp-2">
+              <p v-if="task.description" class="text-xs sm:text-sm text-slate-600 mt-1">
                 {{ task.description }}
               </p>
               <div class="flex flex-wrap items-center gap-2 mt-2">
@@ -557,203 +513,199 @@ onMounted(() => {
     </main>
 
     <!-- Add Task Modal -->
-    <teleport to="body">
-      <transition name="modal">
-        <div 
-          v-if="showAddTaskModal"
-          class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50"
-          @click.self="showAddTaskModal = false"
-        >
-          <div class="bg-white rounded-2xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
-            <div class="flex items-center justify-between mb-6">
-              <h3 class="text-2xl font-bold text-slate-800">Add New Task</h3>
-              <button 
-                @click="showAddTaskModal = false"
-                class="text-slate-400 hover:text-slate-600 p-1"
+    <transition name="modal">
+      <div 
+        v-if="showAddTaskModal"
+        class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50"
+        @click.self="showAddTaskModal = false"
+      >
+        <div class="bg-white rounded-2xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
+          <div class="flex items-center justify-between mb-6">
+            <h3 class="text-2xl font-bold text-slate-800">Add New Task</h3>
+            <button 
+              @click="showAddTaskModal = false"
+              class="text-slate-400 hover:text-slate-600 p-1"
+            >
+              <i class="fas fa-times text-xl"></i>
+            </button>
+          </div>
+          
+          <form @submit.prevent="addTask" class="space-y-4">
+            <div>
+              <label class="block text-sm font-medium text-slate-700 mb-2">Title *</label>
+              <input 
+                v-model="newTask.title"
+                type="text" 
+                class="w-full px-4 py-3 rounded-lg border border-slate-200 focus:border-blue-500 focus:ring-4 focus:ring-blue-50 transition-all outline-none" 
+                placeholder="Task title" 
+                required
               >
-                <i class="fas fa-times text-xl"></i>
-              </button>
             </div>
-            
-            <form @submit.prevent="addTask" class="space-y-4">
+
+            <div>
+              <label class="block text-sm font-medium text-slate-700 mb-2">Description</label>
+              <textarea 
+                v-model="newTask.description"
+                class="w-full px-4 py-3 rounded-lg border border-slate-200 focus:border-blue-500 focus:ring-4 focus:ring-blue-50 transition-all outline-none resize-none" 
+                rows="3"
+                placeholder="Task description"
+              ></textarea>
+            </div>
+
+            <div class="grid grid-cols-2 gap-4">
               <div>
-                <label class="block text-sm font-medium text-slate-700 mb-2">Title *</label>
+                <label class="block text-sm font-medium text-slate-700 mb-2">Date *</label>
                 <input 
-                  v-model="newTask.title"
-                  type="text" 
+                  v-model="newTask.date"
+                  type="date" 
                   class="w-full px-4 py-3 rounded-lg border border-slate-200 focus:border-blue-500 focus:ring-4 focus:ring-blue-50 transition-all outline-none" 
-                  placeholder="Task title" 
                   required
                 >
               </div>
 
               <div>
-                <label class="block text-sm font-medium text-slate-700 mb-2">Description</label>
-                <textarea 
-                  v-model="newTask.description"
-                  class="w-full px-4 py-3 rounded-lg border border-slate-200 focus:border-blue-500 focus:ring-4 focus:ring-blue-50 transition-all outline-none resize-none" 
-                  rows="3"
-                  placeholder="Task description"
-                ></textarea>
-              </div>
-
-              <div class="grid grid-cols-2 gap-4">
-                <div>
-                  <label class="block text-sm font-medium text-slate-700 mb-2">Date *</label>
-                  <input 
-                    v-model="newTask.date"
-                    type="date" 
-                    class="w-full px-4 py-3 rounded-lg border border-slate-200 focus:border-blue-500 focus:ring-4 focus:ring-blue-50 transition-all outline-none" 
-                    required
-                  >
-                </div>
-
-                <div>
-                  <label class="block text-sm font-medium text-slate-700 mb-2">Time</label>
-                  <input 
-                    v-model="newTask.time"
-                    type="time" 
-                    class="w-full px-4 py-3 rounded-lg border border-slate-200 focus:border-blue-500 focus:ring-4 focus:ring-blue-50 transition-all outline-none"
-                  >
-                </div>
-              </div>
-
-              <div>
-                <label class="block text-sm font-medium text-slate-700 mb-2">Priority</label>
-                <select 
-                  v-model="newTask.priority"
+                <label class="block text-sm font-medium text-slate-700 mb-2">Time</label>
+                <input 
+                  v-model="newTask.time"
+                  type="time" 
                   class="w-full px-4 py-3 rounded-lg border border-slate-200 focus:border-blue-500 focus:ring-4 focus:ring-blue-50 transition-all outline-none"
                 >
-                  <option value="low">Low</option>
-                  <option value="medium">Medium</option>
-                  <option value="high">High</option>
-                  <option value="urgent">Urgent</option>
-                </select>
               </div>
+            </div>
 
-              <div class="flex gap-3 mt-6">
-                <button 
-                  type="button"
-                  @click="showAddTaskModal = false"
-                  class="flex-1 py-3 px-4 bg-slate-200 text-slate-700 font-semibold rounded-lg hover:bg-slate-300 transition-all"
-                >
-                  Cancel
-                </button>
-                <button 
-                  type="submit"
-                  class="flex-1 py-3 px-4 bg-gradient-to-r from-blue-600 to-purple-600 text-white font-semibold rounded-lg hover:from-blue-700 hover:to-purple-700 transition-all shadow-lg"
-                >
-                  Add Task
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      </transition>
-    </teleport>
-
-    <!-- Settings Modal -->
-    <teleport to="body">
-      <transition name="modal">
-        <div 
-          v-if="showSettingsModal"
-          class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50"
-          @click.self="showSettingsModal = false"
-        >
-          <div class="bg-white rounded-2xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
-            <div class="flex items-center justify-between mb-6">
-              <h3 class="text-2xl font-bold text-slate-800">Settings</h3>
-              <button 
-                @click="showSettingsModal = false"
-                class="text-slate-400 hover:text-slate-600 p-1"
+            <div>
+              <label class="block text-sm font-medium text-slate-700 mb-2">Priority</label>
+              <select 
+                v-model="newTask.priority"
+                class="w-full px-4 py-3 rounded-lg border border-slate-200 focus:border-blue-500 focus:ring-4 focus:ring-blue-50 transition-all outline-none"
               >
-                <i class="fas fa-times text-xl"></i>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+                <option value="urgent">Urgent</option>
+              </select>
+            </div>
+
+            <div class="flex gap-3 mt-6">
+              <button 
+                type="button"
+                @click="showAddTaskModal = false"
+                class="flex-1 py-3 px-4 bg-slate-200 text-slate-700 font-semibold rounded-lg hover:bg-slate-300 transition-all"
+              >
+                Cancel
+              </button>
+              <button 
+                type="submit"
+                class="flex-1 py-3 px-4 bg-gradient-to-r from-blue-600 to-purple-600 text-white font-semibold rounded-lg hover:from-blue-700 hover:to-purple-700 transition-all shadow-lg"
+              >
+                Add Task
               </button>
             </div>
-            
-            <form @submit.prevent="updateSettings" class="space-y-4">
-              <div>
-                <label class="block text-sm font-medium text-slate-700 mb-2">
-                  <i class="fas fa-user mr-2 text-slate-400"></i>First Name
-                </label>
-                <input 
-                  v-model="userSettings.first_name"
-                  type="text" 
-                  class="w-full px-4 py-3 rounded-lg border border-slate-200 focus:border-blue-500 focus:ring-4 focus:ring-blue-50 transition-all outline-none" 
-                  placeholder="First name"
-                >
-              </div>
+          </form>
+        </div>
+      </div>
+    </transition>
 
-              <div>
-                <label class="block text-sm font-medium text-slate-700 mb-2">
-                  <i class="fas fa-user mr-2 text-slate-400"></i>Last Name
-                </label>
-                <input 
-                  v-model="userSettings.last_name"
-                  type="text" 
-                  class="w-full px-4 py-3 rounded-lg border border-slate-200 focus:border-blue-500 focus:ring-4 focus:ring-blue-50 transition-all outline-none" 
-                  placeholder="Last name"
-                >
-              </div>
+    <!-- Settings Modal -->
+    <transition name="modal">
+      <div 
+        v-if="showSettingsModal"
+        class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50"
+        @click.self="showSettingsModal = false"
+      >
+        <div class="bg-white rounded-2xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
+          <div class="flex items-center justify-between mb-6">
+            <h3 class="text-2xl font-bold text-slate-800">Settings</h3>
+            <button 
+              @click="showSettingsModal = false"
+              class="text-slate-400 hover:text-slate-600 p-1"
+            >
+              <i class="fas fa-times text-xl"></i>
+            </button>
+          </div>
+          
+          <form @submit.prevent="updateSettings" class="space-y-4">
+            <div>
+              <label class="block text-sm font-medium text-slate-700 mb-2">
+                <i class="fas fa-user mr-2 text-slate-400"></i>First Name
+              </label>
+              <input 
+                v-model="userSettings.first_name"
+                type="text" 
+                class="w-full px-4 py-3 rounded-lg border border-slate-200 focus:border-blue-500 focus:ring-4 focus:ring-blue-50 transition-all outline-none" 
+                placeholder="First name"
+              >
+            </div>
 
-              <div>
-                <label class="block text-sm font-medium text-slate-700 mb-2">
-                  <i class="fas fa-at mr-2 text-slate-400"></i>Username
-                </label>
-                <input 
-                  v-model="userSettings.username"
-                  type="text" 
-                  class="w-full px-4 py-3 rounded-lg border border-slate-200 bg-slate-50 cursor-not-allowed" 
-                  disabled
-                >
-                <p class="text-xs text-slate-500 mt-1">Username cannot be changed</p>
-              </div>
+            <div>
+              <label class="block text-sm font-medium text-slate-700 mb-2">
+                <i class="fas fa-user mr-2 text-slate-400"></i>Last Name
+              </label>
+              <input 
+                v-model="userSettings.last_name"
+                type="text" 
+                class="w-full px-4 py-3 rounded-lg border border-slate-200 focus:border-blue-500 focus:ring-4 focus:ring-blue-50 transition-all outline-none" 
+                placeholder="Last name"
+              >
+            </div>
 
-              <div>
-                <label class="block text-sm font-medium text-slate-700 mb-2">
-                  <i class="fas fa-envelope mr-2 text-slate-400"></i>Email
-                </label>
-                <input 
-                  v-model="userSettings.email"
-                  type="email" 
-                  class="w-full px-4 py-3 rounded-lg border border-slate-200 focus:border-blue-500 focus:ring-4 focus:ring-blue-50 transition-all outline-none" 
-                  placeholder="Email address"
-                >
-              </div>
+            <div>
+              <label class="block text-sm font-medium text-slate-700 mb-2">
+                <i class="fas fa-at mr-2 text-slate-400"></i>Username
+              </label>
+              <input 
+                v-model="userSettings.username"
+                type="text" 
+                class="w-full px-4 py-3 rounded-lg border border-slate-200 bg-slate-50 cursor-not-allowed" 
+                disabled
+              >
+              <p class="text-xs text-slate-500 mt-1">Username cannot be changed</p>
+            </div>
 
-              <div class="flex gap-3 mt-6">
-                <button 
-                  type="button"
-                  @click="showSettingsModal = false"
-                  class="flex-1 py-3 px-4 bg-slate-200 text-slate-700 font-semibold rounded-lg hover:bg-slate-300 transition-all"
-                >
-                  Cancel
-                </button>
-                <button 
-                  type="submit"
-                  class="flex-1 py-3 px-4 bg-gradient-to-r from-blue-600 to-purple-600 text-white font-semibold rounded-lg hover:from-blue-700 hover:to-purple-700 transition-all shadow-lg"
-                >
-                  Save Changes
-                </button>
-              </div>
-            </form>
+            <div>
+              <label class="block text-sm font-medium text-slate-700 mb-2">
+                <i class="fas fa-envelope mr-2 text-slate-400"></i>Email
+              </label>
+              <input 
+                v-model="userSettings.email"
+                type="email" 
+                class="w-full px-4 py-3 rounded-lg border border-slate-200 focus:border-blue-500 focus:ring-4 focus:ring-blue-50 transition-all outline-none" 
+                placeholder="Email address"
+              >
+            </div>
 
-            <!-- Additional Info -->
-            <div class="mt-6 p-4 bg-slate-50 rounded-lg">
-              <h4 class="font-semibold text-slate-700 mb-2 flex items-center gap-2">
-                <i class="fas fa-info-circle text-blue-500"></i>
-                Account Info
-              </h4>
-              <div class="space-y-1 text-sm text-slate-600">
-                <p><strong>Username:</strong> {{ user?.username }}</p>
-                <p><strong>Email:</strong> {{ user?.email }}</p>
-                <p><strong>Tasks:</strong> {{ tasks.length }} total</p>
-              </div>
+            <div class="flex gap-3 mt-6">
+              <button 
+                type="button"
+                @click="showSettingsModal = false"
+                class="flex-1 py-3 px-4 bg-slate-200 text-slate-700 font-semibold rounded-lg hover:bg-slate-300 transition-all"
+              >
+                Cancel
+              </button>
+              <button 
+                type="submit"
+                class="flex-1 py-3 px-4 bg-gradient-to-r from-blue-600 to-purple-600 text-white font-semibold rounded-lg hover:from-blue-700 hover:to-purple-700 transition-all shadow-lg"
+              >
+                Save Changes
+              </button>
+            </div>
+          </form>
+
+          <!-- Additional Info -->
+          <div class="mt-6 p-4 bg-slate-50 rounded-lg">
+            <h4 class="font-semibold text-slate-700 mb-2 flex items-center gap-2">
+              <i class="fas fa-info-circle text-blue-500"></i>
+              Account Info
+            </h4>
+            <div class="space-y-1 text-sm text-slate-600">
+              <p><strong>Username:</strong> {{ user?.username || 'N/A' }}</p>
+              <p><strong>Email:</strong> {{ user?.email || 'N/A' }}</p>
+              <p><strong>Tasks:</strong> {{ tasks.length }} total</p>
             </div>
           </div>
         </div>
-      </transition>
-    </teleport>
+      </div>
+    </transition>
 
     <!-- Floating Add Button (Mobile) -->
     <button 
@@ -788,11 +740,8 @@ onMounted(() => {
   transform: scale(0.95);
 }
 
-.line-clamp-2 {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+.custom-checkbox input:checked + div {
+  background-color: #3b82f6;
+  border-color: #3b82f6;
 }
 </style>
