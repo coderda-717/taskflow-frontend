@@ -311,6 +311,18 @@ const changeView = (view) => {
   showMobileMenu.value = false
 }
 
+const resetPasswordFields = () => {
+  userSettings.value.current_password = ''
+  userSettings.value.new_password = ''
+  userSettings.value.confirm_password = ''
+  showPasswordFields.value = false
+}
+
+const closeSettingsModal = () => {
+  showSettingsModal.value = false
+  resetPasswordFields()
+}
+
 onMounted(() => {
   loadUserProfile()
   loadTasks()
